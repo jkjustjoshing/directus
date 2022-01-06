@@ -36,6 +36,8 @@ import alias from '@rollup/plugin-alias';
 import { Url } from './utils/url';
 import getModuleDefault from './utils/get-module-default';
 import { escapeRegExp } from 'lodash';
+import chokidar, { FSWatcher } from 'chokidar';
+import { pluralize } from '@directus/shared/utils';
 
 let extensionManager: ExtensionManager | undefined;
 
@@ -51,6 +53,7 @@ export function getExtensionManager(): ExtensionManager {
 
 class ExtensionManager {
 	private isInitialized = false;
+	private isScheduleHookEnabled = true;
 
 	private extensions: Extension[] = [];
 
@@ -67,7 +70,7 @@ class ExtensionManager {
 	private apiEmitter: Emitter;
 	private endpointRouter: Router;
 
-	private isScheduleHookEnabled = true;
+	private watcher: FSWatcher | null = null;
 
 	constructor() {
 		this.apiEmitter = new Emitter();
@@ -93,6 +96,18 @@ class ExtensionManager {
 
 		if (env.SERVE_APP) {
 			this.appExtensions = await this.generateExtensionBundles();
+		}
+
+		if (env.EXTENSIONS_AUTO_RELOAD && env.NODE_ENV !== 'development' && !this.watcher) {
+			const localExtensionPaths = (env.SERVE_APP ? EXTENSION_TYPES : API_EXTENSION_TYPES).map((type) =>
+				path.resolve(env.EXTENSIONS_PATH, pluralize(type))
+			);
+
+			this.watcher = chokidar.watch(localExtensionPaths, { ignoreInitial: true });
+			this.watcher
+				.on('add', () => this.reload())
+				.on('change', () => this.reload())
+				.on('unlink', () => this.reload());
 		}
 
 		const loadedExtensions = this.listExtensions();
